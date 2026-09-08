@@ -1,6 +1,6 @@
 {
   "name": "@jujuleaf/worker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dispatch Overleaf comment tasks from JujuLeaf to coding agents.",
   "type": "module",
   "bin": {
