@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "taskId", "status", "summary", "changedFiles", "validation", "question", "warnings"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "taskId": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "no_changes", "needs_input", "blocked"]
+    },
+    "summary": { "type": "string" },
+    "changedFiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "summary"],
+        "properties": {
+          "path": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "summary"],
+        "properties": {
+          "name": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_run"]
+          },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "question": { "type": ["string", "null"] },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

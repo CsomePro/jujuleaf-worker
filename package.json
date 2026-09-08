@@ -1,0 +1,49 @@
+{
+  "name": "@jujuleaf/worker",
+  "version": "0.1.0",
+  "description": "Dispatch Overleaf comment tasks from JujuLeaf to Codex.",
+  "type": "module",
+  "bin": {
+    "jujuleaf-worker": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist/src/",
+    "schemas/",
+    "sop/",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CsomePro/jujuleaf-worker.git"
+  },
+  "homepage": "https://github.com/CsomePro/jujuleaf-worker#readme",
+  "bugs": {
+    "url": "https://github.com/CsomePro/jujuleaf-worker/issues"
+  },
+  "keywords": [
+    "overleaf",
+    "jujuleaf",
+    "codex",
+    "agent",
+    "worker"
+  ],
+  "author": "CsomePro",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
