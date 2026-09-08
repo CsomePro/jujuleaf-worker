@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { CodexRunOptions, CodexRunResult } from "./codex.js";
+import type {
+  AgentRunOptions,
+  AgentRunResult,
+} from "./agent.js";
 import { buildPrompt } from "./prompt.js";
 import { StatusReporter } from "./status.js";
 import type { WorkerState } from "./state.js";
@@ -11,6 +14,7 @@ import type {
   CommentSnapshot,
   CommentThread,
   ThreadContext,
+  AgentName,
   WorkerTask,
 } from "./types.js";
 
@@ -22,7 +26,7 @@ interface SnapshotRecordData {
 export interface CoordinatorOptions {
   cwd: string;
   mention: string;
-  allowedProfiles: readonly string[];
+  defaultAgent: AgentName;
   bootstrap: "recent" | "ignore" | "all";
   lookbackMinutes: number;
   statusIntervalSeconds: number;
@@ -34,8 +38,8 @@ export interface JujuLeafPort {
   editReply(threadId: string, messageId: string, content: string): Promise<void>;
 }
 
-export interface CodexPort {
-  run(options: CodexRunOptions): Promise<CodexRunResult>;
+export interface AgentPort {
+  run(options: AgentRunOptions): Promise<AgentRunResult>;
 }
 
 function log(message: string): void {
@@ -92,7 +96,7 @@ export class TaskCoordinator {
   constructor(
     private readonly state: WorkerState,
     private readonly jujuleaf: JujuLeafPort,
-    private readonly codex: CodexPort,
+    private readonly agents: ReadonlyMap<AgentName, AgentPort>,
     private readonly options: CoordinatorOptions,
   ) {}
 
@@ -171,14 +175,14 @@ export class TaskCoordinator {
       projectId: context.project.id,
       threadId: context.thread.id,
       messageId: message.id,
+      agent: trigger.agent ?? this.options.defaultAgent,
       action: trigger.action,
       request: trigger.request,
       ...(message.author?.id ? { actorId: message.author.id } : {}),
-      ...(trigger.agentProfile ? { agentProfile: trigger.agentProfile } : {}),
     };
     if (!this.state.claimTask(task)) return;
 
-    log(`queued ${task.id} for thread ${task.threadId}`);
+    log(`queued ${task.id} for ${task.agent} in thread ${task.threadId}`);
     this.queue = this.queue
       .then(() => this.execute(task, context))
       .catch((error: unknown) => {
@@ -202,12 +206,10 @@ export class TaskCoordinator {
         log(`could not post status for ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
 
-      if (
-        task.agentProfile &&
-        !this.options.allowedProfiles.includes(task.agentProfile)
-      ) {
+      const agent = this.agents.get(task.agent);
+      if (!agent) {
         await reporter.blocked(
-          `Codex profile “${task.agentProfile}” is not enabled for this worker. Restart it with --allow-profile ${task.agentProfile} if that profile is trusted.`,
+          `${task.agent === "kimi" ? "Kimi Code" : "Codex"} is not ready for this worker. Run jujuleaf-worker doctor for details.`,
         );
         this.state.updateTask(task.id, "blocked");
         return;
@@ -223,22 +225,21 @@ export class TaskCoordinator {
       const existingSession = this.state.getSession(
         task.projectId,
         task.threadId,
-        task.agentProfile,
+        task.agent,
       );
       const prompt = buildPrompt(task, context);
-      const execution = await this.codex.run({
+      const execution = await agent.run({
         cwd: this.options.cwd,
         prompt,
-        ...(task.agentProfile ? { profile: task.agentProfile } : {}),
         ...(existingSession ? { sessionId: existingSession } : {}),
         onSession: (sessionId) => {
           this.state.setSession(
             task.projectId,
             task.threadId,
             sessionId,
-            task.agentProfile,
+            task.agent,
           );
-          this.state.updateTask(task.id, "running", { codexSessionId: sessionId });
+          this.state.updateTask(task.id, "running", { sessionId });
         },
         onProgress: (progress) => {
           void reporter.progress(progress).catch((error: unknown) => {
@@ -248,7 +249,7 @@ export class TaskCoordinator {
       });
       if (execution.result.taskId !== task.id) {
         throw new Error(
-          `Codex returned taskId ${execution.result.taskId}, expected ${task.id}`,
+          `${task.agent} returned taskId ${execution.result.taskId}, expected ${task.id}`,
         );
       }
       if (execution.sessionId) {
@@ -256,7 +257,7 @@ export class TaskCoordinator {
           task.projectId,
           task.threadId,
           execution.sessionId,
-          task.agentProfile,
+          task.agent,
         );
       }
       await reporter.finish(execution.result);
@@ -267,7 +268,7 @@ export class TaskCoordinator {
             ? "blocked"
             : "completed";
       this.state.updateTask(task.id, status, {
-        ...(execution.sessionId ? { codexSessionId: execution.sessionId } : {}),
+        ...(execution.sessionId ? { sessionId: execution.sessionId } : {}),
         ...(reporter.statusMessageId
           ? { statusMessageId: reporter.statusMessageId }
           : {}),

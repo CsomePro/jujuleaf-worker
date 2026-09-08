@@ -14,10 +14,18 @@ function taskLabel(task: WorkerTask): string {
   return task.id.slice(0, 13);
 }
 
+function agentLabel(task: WorkerTask): string {
+  return task.agent === "kimi" ? "Kimi Code" : "Codex";
+}
+
 export function renderFinal(task: WorkerTask, result: AgentResult): string {
   const icon =
     result.status === "completed" || result.status === "no_changes" ? "✅" : "⚠️";
-  const lines = [`${icon} ${taskLabel(task)} · ${result.status}`, "", result.summary];
+  const lines = [
+    `${icon} ${taskLabel(task)} · ${agentLabel(task)} · ${result.status}`,
+    "",
+    result.summary,
+  ];
   if (result.changedFiles.length > 0) {
     lines.push("", "修改文件：");
     for (const file of result.changedFiles.slice(0, 12)) {
@@ -56,7 +64,7 @@ export class StatusReporter {
     const content = [
       `⏳ ${taskLabel(this.task)} · queued`,
       "",
-      `已接收 @codex ${this.task.action} 任务，正在启动 Codex。`,
+      `已接收 ${this.task.action} 任务，正在启动 ${agentLabel(this.task)}。`,
     ].join("\n");
     this.messageId = await this.jujuleaf.reply(this.task.threadId, content);
     this.lastUpdate = Date.now();
@@ -110,7 +118,7 @@ export class StatusReporter {
     const content = [
       `⚠️ ${taskLabel(this.task)} · needs_input`,
       "",
-      "请在 @codex 后写明需要执行的任务。",
+      "请在 worker mention 后写明需要执行的任务。",
     ].join("\n");
     if (this.messageId) {
       const messageId = this.messageId;

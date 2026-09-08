@@ -88,12 +88,14 @@ export interface CommentEventData {
   observedAt?: string;
 }
 
+export type AgentName = "codex" | "kimi";
+
 export type TaskAction = "ask" | "suggest" | "edit" | "compile";
 
 export interface Trigger {
+  agent?: AgentName;
   action: TaskAction;
   request: string;
-  agentProfile?: string;
 }
 
 export type TaskStatus =
@@ -111,9 +113,9 @@ export interface WorkerTask {
   threadId: string;
   messageId: string;
   actorId?: string;
+  agent: AgentName;
   action: TaskAction;
   request: string;
-  agentProfile?: string;
 }
 
 export interface AgentValidation {

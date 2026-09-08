@@ -54,7 +54,6 @@ test("runs and resumes Codex with a structured output schema", async () => {
     const first = await client.run({
       cwd: directory,
       prompt: '{ "taskId": "task-1" }',
-      profile: "writing",
       onProgress: (item) => progress.push(item.phase),
       onSession: (sessionId) => sessions.push(sessionId),
     });
@@ -70,7 +69,7 @@ test("runs and resumes Codex with a structured output schema", async () => {
       "--approve-for-me",
       "-C",
       directory,
-      "--profile",
+      "exec",
     ]);
     assert(firstArgs.includes("--output-schema"));
 

@@ -1,7 +1,7 @@
 {
   "name": "@jujuleaf/worker",
   "version": "0.1.0",
-  "description": "Dispatch Overleaf comment tasks from JujuLeaf to Codex.",
+  "description": "Dispatch Overleaf comment tasks from JujuLeaf to coding agents.",
   "type": "module",
   "bin": {
     "jujuleaf-worker": "./dist/src/cli.js"
@@ -37,6 +37,7 @@
     "overleaf",
     "jujuleaf",
     "codex",
+    "kimi",
     "agent",
     "worker"
   ],

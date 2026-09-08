@@ -4,9 +4,12 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AgentClient } from "./agent.js";
 import { JujuLeafClient } from "./bridge.js";
 import { CodexClient } from "./codex.js";
 import { TaskCoordinator } from "./coordinator.js";
+import { KimiClient } from "./kimi.js";
+import type { AgentName } from "./types.js";
 
 const VERSION = "0.1.0";
 
@@ -15,8 +18,9 @@ export interface Options {
   cwd: string;
   jujuleaf: string;
   codex: string;
+  kimi: string;
   mention: string;
-  allowedProfiles: string[];
+  defaultAgent: AgentName;
   protocol: number;
   reconcileInterval: number;
   bootstrap: "recent" | "ignore" | "all";
@@ -38,8 +42,8 @@ Usage:
   jujuleaf-worker doctor [options]
 
 Options:
-  --mention <name>             Mention prefix (default: @codex)
-  --allow-profile <name>       Permit an @codex-<name> profile (repeatable)
+  --mention <name>             Mention prefix (default: @worker)
+  --default-agent <name>       codex or kimi (default: codex)
   --protocol <number>          Bridge protocol version (default: 1)
   --reconcile-interval <secs>  Snapshot interval, minimum 5 (default: 60)
   --bootstrap <mode>           recent, ignore, or all (default: recent)
@@ -48,6 +52,7 @@ Options:
   --state <path>               SQLite state database
   --jujuleaf <path>            JujuLeaf executable (default: jujuleaf)
   --codex <path>               Codex executable (default: codex)
+  --kimi <path>                Kimi Code executable (default: kimi)
   -C, --cwd <path>             Dedicated JujuLeaf clone (default: current directory)
   -h, --help                   Show help
   -V, --version                Show version
@@ -74,8 +79,9 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
     cwd: process.cwd(),
     jujuleaf: "jujuleaf",
     codex: "codex",
-    mention: "@codex",
-    allowedProfiles: [],
+    kimi: "kimi",
+    mention: "@worker",
+    defaultAgent: "codex",
     protocol: 1,
     reconcileInterval: 60,
     bootstrap: "recent",
@@ -89,17 +95,17 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
     const value = args[index + 1];
     switch (arg) {
       case "--mention":
-        if (!value) throw new Error("--mention requires a value");
+        if (!value || !/^@?[a-z0-9][a-z0-9_-]*$/i.test(value)) {
+          throw new Error("--mention requires a simple @name");
+        }
         options.mention = value.startsWith("@") ? value : `@${value}`;
         index += 1;
         break;
-      case "--allow-profile":
-        if (!value || !/^[a-z0-9][a-z0-9_-]*$/i.test(value)) {
-          throw new Error("--allow-profile requires a profile name");
+      case "--default-agent":
+        if (value !== "codex" && value !== "kimi") {
+          throw new Error("--default-agent must be codex or kimi");
         }
-        if (!options.allowedProfiles.includes(value.toLowerCase())) {
-          options.allowedProfiles.push(value.toLowerCase());
-        }
+        options.defaultAgent = value;
         index += 1;
         break;
       case "--protocol":
@@ -140,6 +146,11 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
         options.codex = value;
         index += 1;
         break;
+      case "--kimi":
+        if (!value) throw new Error("--kimi requires a path");
+        options.kimi = value;
+        index += 1;
+        break;
       case "-C":
       case "--cwd":
         if (!value) throw new Error(`${arg} requires a path`);
@@ -153,7 +164,7 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
   return options;
 }
 
-function codexSkillInstalled(value: unknown): boolean {
+function skillInstalled(value: unknown, agent: AgentName): boolean {
   if (typeof value !== "object" || value === null) return false;
   const installations = (value as { installations?: unknown }).installations;
   if (!Array.isArray(installations)) return false;
@@ -162,17 +173,42 @@ function codexSkillInstalled(value: unknown): boolean {
     const record = installation as { agents?: unknown; status?: unknown };
     return (
       Array.isArray(record.agents) &&
-      record.agents.includes("codex") &&
+      record.agents.includes(agent === "kimi" ? "kimi-code" : "codex") &&
       record.status === "current"
     );
   });
 }
 
+interface CheckedAgent {
+  client: AgentClient;
+  skillInstalled: boolean;
+  version?: string;
+  error?: string;
+}
+
+async function checkAgent(
+  client: AgentClient,
+  cwd: string,
+  hasSkill: boolean,
+): Promise<CheckedAgent> {
+  try {
+    return {
+      client,
+      skillInstalled: hasSkill,
+      version: await client.check(cwd),
+    };
+  } catch (error) {
+    return {
+      client,
+      skillInstalled: hasSkill,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 async function preflight(options: Options): Promise<{
   jujuleaf: JujuLeafClient;
-  codex: CodexClient;
-  codexVersion: string;
-  skillInstalled: boolean;
+  agents: CheckedAgent[];
 }> {
   if (!existsSync(options.cwd)) throw new Error(`workspace does not exist: ${options.cwd}`);
   const jujuleaf = new JujuLeafClient({
@@ -181,11 +217,14 @@ async function preflight(options: Options): Promise<{
     protocol: options.protocol,
   });
   const codex = new CodexClient(options.codex);
+  const kimi = new KimiClient(options.kimi);
   await jujuleaf.describe();
   const skillStatus = await jujuleaf.skillStatus();
-  const skillInstalled = codexSkillInstalled(skillStatus);
-  const codexVersion = await codex.check(options.cwd);
-  return { jujuleaf, codex, codexVersion, skillInstalled };
+  const agents = await Promise.all([
+    checkAgent(codex, options.cwd, skillInstalled(skillStatus, "codex")),
+    checkAgent(kimi, options.cwd, skillInstalled(skillStatus, "kimi")),
+  ]);
+  return { jujuleaf, agents };
 }
 
 async function doctor(options: Options): Promise<number> {
@@ -193,14 +232,22 @@ async function doctor(options: Options): Promise<number> {
   try {
     const result = await preflight(options);
     checks.push({ name: "jujuleaf-bridge", status: "ok", detail: `protocol ${options.protocol}` });
-    checks.push({ name: "codex", status: "ok", detail: result.codexVersion });
-    checks.push({
-      name: "jujuleaf-skill",
-      status: result.skillInstalled ? "ok" : "warning",
-      detail: result.skillInstalled
-        ? "Codex installation is current"
-        : "run `jujuleaf skill install` and select Codex",
-    });
+    for (const agent of result.agents) {
+      const label = agent.client.name === "kimi" ? "kimi-code" : "codex";
+      const required = agent.client.name === options.defaultAgent;
+      checks.push({
+        name: label,
+        status: agent.error ? (required ? "error" : "warning") : "ok",
+        detail: agent.error ?? agent.version ?? "available",
+      });
+      checks.push({
+        name: `jujuleaf-skill:${label}`,
+        status: agent.skillInstalled ? "ok" : required ? "error" : "warning",
+        detail: agent.skillInstalled
+          ? `${label} installation is current`
+          : `run \`jujuleaf skill install\` and select ${label}`,
+      });
+    }
     try {
       const snapshot = await result.jujuleaf.listComments();
       checks.push({
@@ -230,20 +277,29 @@ async function doctor(options: Options): Promise<number> {
 }
 
 async function run(options: Options): Promise<number> {
-  const { jujuleaf, codex, codexVersion, skillInstalled } = await preflight(options);
-  if (!skillInstalled) {
+  const { jujuleaf, agents: checkedAgents } = await preflight(options);
+  const agents = new Map<AgentName, AgentClient>();
+  for (const checked of checkedAgents) {
+    if (!checked.error && checked.skillInstalled) {
+      agents.set(checked.client.name, checked.client);
+    }
+  }
+  if (!agents.has(options.defaultAgent)) {
+    const selected = checkedAgents.find(
+      (checked) => checked.client.name === options.defaultAgent,
+    );
     throw new Error(
-      "The JujuLeaf Skill is not currently installed for Codex. Run `jujuleaf skill install` and select Codex.",
+      `The default agent ${options.defaultAgent} is not ready: ${selected?.error ?? "its JujuLeaf Skill is not current"}. Run jujuleaf-worker doctor for details.`,
     );
   }
 
   const { WorkerState } = await import("./state.js");
   const state = new WorkerState(options.statePath);
   const interrupted = state.recoverInterruptedTasks();
-  const coordinator = new TaskCoordinator(state, jujuleaf, codex, {
+  const coordinator = new TaskCoordinator(state, jujuleaf, agents, {
     cwd: options.cwd,
     mention: options.mention,
-    allowedProfiles: options.allowedProfiles,
+    defaultAgent: options.defaultAgent,
     bootstrap: options.bootstrap,
     lookbackMinutes: options.lookbackMinutes,
     statusIntervalSeconds: options.statusInterval,
@@ -254,7 +310,7 @@ async function run(options: Options): Promise<number> {
   process.once("SIGTERM", stop);
 
   process.stdout.write(
-    `JujuLeaf Worker ${VERSION}\nWorkspace: ${options.cwd}\nCodex: ${codexVersion}\nMention: ${options.mention}\n`,
+    `JujuLeaf Worker ${VERSION}\nWorkspace: ${options.cwd}\nAgents: ${[...agents.keys()].join(", ")}\nDefault agent: ${options.defaultAgent}\nMention: ${options.mention}\n`,
   );
   if (interrupted > 0) {
     process.stdout.write(`Recovered ${interrupted} interrupted task record(s).\n`);

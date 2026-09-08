@@ -5,12 +5,17 @@ import type { ThreadContext, WorkerTask } from "./types.js";
 const sopPath = fileURLToPath(
   new URL("../../sop/comment-task.md", import.meta.url),
 );
+const resultSchemaPath = fileURLToPath(
+  new URL("../../schemas/result.schema.json", import.meta.url),
+);
 
 export function buildPrompt(task: WorkerTask, context: ThreadContext): string {
   const sop = readFileSync(sopPath, "utf8").trim();
+  const resultSchema = readFileSync(resultSchemaPath, "utf8").trim();
   const taskEnvelope: Record<string, unknown> = {
     schemaVersion: 1,
     taskId: task.id,
+    agent: task.agent,
     action: task.action,
     projectId: task.projectId,
     threadId: task.threadId,
@@ -18,7 +23,6 @@ export function buildPrompt(task: WorkerTask, context: ThreadContext): string {
     request: task.request,
   };
   if (task.actorId) taskEnvelope.actorId = task.actorId;
-  if (task.agentProfile) taskEnvelope.codexProfile = task.agentProfile;
 
   const contextEnvelope = {
     project: context.project,
@@ -47,5 +51,9 @@ export function buildPrompt(task: WorkerTask, context: ThreadContext): string {
     "<thread_context>",
     JSON.stringify(contextEnvelope, null, 2),
     "</thread_context>",
+    "",
+    "<result_contract>",
+    resultSchema,
+    "</result_contract>",
   ].join("\n");
 }

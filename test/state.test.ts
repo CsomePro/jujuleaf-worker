@@ -12,12 +12,13 @@ function task(id: string): WorkerTask {
     projectId: "project-1",
     threadId: "thread-1",
     messageId: "message-1",
+    agent: "codex",
     action: "suggest",
     request: "Improve this paragraph.",
   };
 }
 
-test("claims messages atomically and keeps sessions profile-specific", () => {
+test("claims messages atomically and keeps sessions agent-specific", () => {
   const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-state-"));
   const state = new WorkerState(join(directory, "nested", "state.sqlite3"));
   try {
@@ -25,12 +26,15 @@ test("claims messages atomically and keeps sessions profile-specific", () => {
     assert.equal(state.claimTask(task("task-2")), false);
     assert.equal(state.hasMessage("project-1", "message-1"), true);
 
-    state.setSession("project-1", "thread-1", "default-session");
-    state.setSession("project-1", "thread-1", "writing-session", "writing");
-    assert.equal(state.getSession("project-1", "thread-1"), "default-session");
+    state.setSession("project-1", "thread-1", "codex-session", "codex");
+    state.setSession("project-1", "thread-1", "kimi-session", "kimi");
     assert.equal(
-      state.getSession("project-1", "thread-1", "writing"),
-      "writing-session",
+      state.getSession("project-1", "thread-1", "codex"),
+      "codex-session",
+    );
+    assert.equal(
+      state.getSession("project-1", "thread-1", "kimi"),
+      "kimi-session",
     );
   } finally {
     state.close();

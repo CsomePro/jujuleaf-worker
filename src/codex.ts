@@ -2,8 +2,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type {
+  AgentClient,
+  AgentRunOptions,
+  AgentRunResult,
+} from "./agent.js";
 import { spawnProcess, runProcess } from "./process.js";
-import type { AgentProgress, AgentResult } from "./types.js";
+import { parseAgentResult } from "./result.js";
+import type { AgentProgress } from "./types.js";
 
 const resultSchemaPath = fileURLToPath(
   new URL("../../schemas/result.schema.json", import.meta.url),
@@ -59,47 +65,9 @@ export function progressFromCodexEvent(value: unknown): AgentProgress | undefine
   return undefined;
 }
 
-function parseAgentResult(text: string): AgentResult {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch (error) {
-    throw new Error(
-      `Codex final response is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const result = object(value);
-  if (
-    !result ||
-    result.schemaVersion !== 1 ||
-    typeof result.taskId !== "string" ||
-    typeof result.status !== "string" ||
-    typeof result.summary !== "string" ||
-    !Array.isArray(result.changedFiles) ||
-    !Array.isArray(result.validation) ||
-    !Array.isArray(result.warnings)
-  ) {
-    throw new Error("Codex final response does not match the worker result contract");
-  }
-  return value as unknown as AgentResult;
-}
+export class CodexClient implements AgentClient {
+  readonly name = "codex" as const;
 
-export interface CodexRunOptions {
-  cwd: string;
-  prompt: string;
-  profile?: string;
-  sessionId?: string;
-  signal?: AbortSignal;
-  onSession?: (sessionId: string) => void;
-  onProgress?: (progress: AgentProgress) => void;
-}
-
-export interface CodexRunResult {
-  result: AgentResult;
-  sessionId?: string;
-}
-
-export class CodexClient {
   constructor(readonly binary = "codex") {}
 
   async version(cwd: string): Promise<string> {
@@ -127,11 +95,10 @@ export class CodexClient {
     return version;
   }
 
-  async run(options: CodexRunOptions): Promise<CodexRunResult> {
+  async run(options: AgentRunOptions): Promise<AgentRunResult> {
     const outputDirectory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-"));
     const outputPath = join(outputDirectory, "result.json");
     const globalArgs = ["--approve-for-me", "-C", options.cwd];
-    if (options.profile) globalArgs.push("--profile", options.profile);
 
     const args = options.sessionId
       ? [
@@ -188,7 +155,7 @@ export class CodexClient {
       }
       const finalText = readFileSync(outputPath, "utf8").trim();
       return {
-        result: parseAgentResult(finalText),
+        result: parseAgentResult(finalText, "Codex"),
         ...(observedSessionId ? { sessionId: observedSessionId } : {}),
       };
     } finally {

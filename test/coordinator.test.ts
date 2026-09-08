@@ -3,15 +3,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { CodexRunOptions, CodexRunResult } from "../src/codex.js";
+import type { AgentRunOptions, AgentRunResult } from "../src/agent.js";
 import {
   TaskCoordinator,
-  type CodexPort,
+  type AgentPort,
+  type CoordinatorOptions,
   type JujuLeafPort,
 } from "../src/coordinator.js";
 import { WorkerState } from "../src/state.js";
 import type {
   BridgeEnvelope,
+  AgentName,
   CommentMessage,
   CommentSnapshot,
   ThreadContext,
@@ -84,10 +86,10 @@ class FakeJujuLeaf implements JujuLeafPort {
   }
 }
 
-class FakeCodex implements CodexPort {
+class FakeAgent implements AgentPort {
   calls = 0;
 
-  async run(options: CodexRunOptions): Promise<CodexRunResult> {
+  async run(options: AgentRunOptions): Promise<AgentRunResult> {
     this.calls += 1;
     const taskId = /"taskId":\s*"([^"]+)"/.exec(options.prompt)?.[1];
     assert(taskId);
@@ -115,27 +117,37 @@ class FakeCodex implements CodexPort {
 }
 
 function coordinatorOptions(overrides: Partial<{
-  allowedProfiles: readonly string[];
+  defaultAgent: AgentName;
   bootstrap: "recent" | "ignore" | "all";
   lookbackMinutes: number;
-}> = {}) {
+}> = {}): CoordinatorOptions {
   return {
     cwd: process.cwd(),
-    mention: "@codex",
-    allowedProfiles: overrides.allowedProfiles ?? [],
+    mention: "@worker",
+    defaultAgent: overrides.defaultAgent ?? "codex",
     bootstrap: overrides.bootstrap ?? "all",
     lookbackMinutes: overrides.lookbackMinutes ?? 30,
     statusIntervalSeconds: 0,
   };
 }
 
-test("dispatches, reports, and deduplicates an @codex task", async () => {
+function agentMap(
+  codex?: AgentPort,
+  kimi?: AgentPort,
+): ReadonlyMap<AgentName, AgentPort> {
+  const agents = new Map<AgentName, AgentPort>();
+  if (codex) agents.set("codex", codex);
+  if (kimi) agents.set("kimi", kimi);
+  return agents;
+}
+
+test("dispatches, reports, and deduplicates an @worker task", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-coordinator-"));
   const state = new WorkerState(join(directory, "state.sqlite3"));
   const value = snapshot([
     {
       id: "message-1",
-      content: "@codex ask Explain this equation.",
+      content: "@worker ask Explain this equation.",
       createdAt: new Date().toISOString(),
       author: { id: "user-1", name: "Researcher" },
     },
@@ -145,12 +157,12 @@ test("dispatches, reports, and deduplicates an @codex task", async () => {
     documents: value.documents,
     thread: value.threads[0]!,
   });
-  const codex = new FakeCodex();
+  const codex = new FakeAgent();
   try {
     const coordinator = new TaskCoordinator(
       state,
       jujuleaf,
-      codex,
+      agentMap(codex),
       coordinatorOptions(),
     );
     await coordinator.accept(envelope(value));
@@ -158,7 +170,10 @@ test("dispatches, reports, and deduplicates an @codex task", async () => {
     assert.equal(codex.calls, 1);
     assert.equal(jujuleaf.replies.length, 1);
     assert.match(jujuleaf.edits.at(-1) ?? "", /no_changes/);
-    assert.equal(state.getSession("project-1", "thread-1"), "session-1");
+    assert.equal(
+      state.getSession("project-1", "thread-1", "codex"),
+      "session-1",
+    );
 
     await coordinator.accept(envelope(value));
     await coordinator.drain();
@@ -175,17 +190,17 @@ test("recent bootstrap handles every recent message and ignores old backlog", as
   const value = snapshot([
     {
       id: "old-message",
-      content: "@codex ask Old task.",
+      content: "@worker ask Old task.",
       createdAt: "2020-01-01T00:00:00.000Z",
     },
     {
       id: "recent-message-1",
-      content: "@codex ask First recent task.",
+      content: "@worker ask First recent task.",
       createdAt: new Date().toISOString(),
     },
     {
       id: "recent-message-2",
-      content: "@codex ask Second recent task.",
+      content: "@worker ask Second recent task.",
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -194,12 +209,12 @@ test("recent bootstrap handles every recent message and ignores old backlog", as
     documents: value.documents,
     thread: value.threads[0]!,
   });
-  const codex = new FakeCodex();
+  const codex = new FakeAgent();
   try {
     const coordinator = new TaskCoordinator(
       state,
       jujuleaf,
-      codex,
+      agentMap(codex),
       coordinatorOptions({ bootstrap: "recent" }),
     );
     await coordinator.accept(envelope(value));
@@ -212,13 +227,13 @@ test("recent bootstrap handles every recent message and ignores old backlog", as
   }
 });
 
-test("blocks untrusted Codex profiles without launching Codex", async () => {
+test("blocks an unavailable explicitly selected agent", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-profile-"));
   const state = new WorkerState(join(directory, "state.sqlite3"));
   const value = snapshot([
     {
       id: "message-1",
-      content: "@codex-unsafe edit Change everything.",
+      content: "@worker-kimi edit Change everything.",
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -227,18 +242,56 @@ test("blocks untrusted Codex profiles without launching Codex", async () => {
     documents: value.documents,
     thread: value.threads[0]!,
   });
-  const codex = new FakeCodex();
+  const codex = new FakeAgent();
   try {
     const coordinator = new TaskCoordinator(
       state,
       jujuleaf,
-      codex,
+      agentMap(codex),
       coordinatorOptions(),
     );
     await coordinator.accept(envelope(value));
     await coordinator.drain();
     assert.equal(codex.calls, 0);
-    assert.match(jujuleaf.edits.at(-1) ?? "", /not enabled/);
+    assert.match(jujuleaf.edits.at(-1) ?? "", /not ready/);
+  } finally {
+    state.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("routes an explicit @worker-kimi task to Kimi Code", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-kimi-route-"));
+  const state = new WorkerState(join(directory, "state.sqlite3"));
+  const value = snapshot([
+    {
+      id: "message-kimi",
+      content: "@worker-kimi ask Explain this.",
+      createdAt: new Date().toISOString(),
+    },
+  ]);
+  const jujuleaf = new FakeJujuLeaf({
+    project: value.project,
+    documents: value.documents,
+    thread: value.threads[0]!,
+  });
+  const codex = new FakeAgent();
+  const kimi = new FakeAgent();
+  try {
+    const coordinator = new TaskCoordinator(
+      state,
+      jujuleaf,
+      agentMap(codex, kimi),
+      coordinatorOptions(),
+    );
+    await coordinator.accept(envelope(value));
+    await coordinator.drain();
+    assert.equal(codex.calls, 0);
+    assert.equal(kimi.calls, 1);
+    assert.equal(
+      state.getSession("project-1", "thread-1", "kimi"),
+      "session-1",
+    );
   } finally {
     state.close();
     rmSync(directory, { recursive: true, force: true });

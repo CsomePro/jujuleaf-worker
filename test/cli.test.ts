@@ -11,15 +11,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { isEntrypoint, parseOptions } from "../src/cli.js";
 
-test("parses worker options and normalizes trusted profiles", () => {
+test("parses worker mention and default agent options", () => {
   const parsed = parseOptions([
     "run",
     "--mention",
     "agent",
-    "--allow-profile",
-    "Writing",
-    "--allow-profile",
-    "writing",
+    "--default-agent",
+    "kimi",
+    "--kimi",
+    "/opt/kimi",
     "--bootstrap",
     "all",
     "--reconcile-interval",
@@ -29,15 +29,20 @@ test("parses worker options and normalizes trusted profiles", () => {
   assert.notEqual(parsed, "version");
   if (parsed === "help" || parsed === "version") return;
   assert.equal(parsed.mention, "@agent");
-  assert.deepEqual(parsed.allowedProfiles, ["writing"]);
+  assert.equal(parsed.defaultAgent, "kimi");
+  assert.equal(parsed.kimi, "/opt/kimi");
   assert.equal(parsed.bootstrap, "all");
   assert.equal(parsed.reconcileInterval, 10);
 });
 
 test("rejects unsafe or invalid option values", () => {
   assert.throws(
-    () => parseOptions(["--allow-profile", "../unsafe"]),
-    /profile name/,
+    () => parseOptions(["--default-agent", "unknown"]),
+    /codex or kimi/,
+  );
+  assert.throws(
+    () => parseOptions(["--mention", "../worker"]),
+    /simple @name/,
   );
   assert.throws(
     () => parseOptions(["--reconcile-interval", "4"]),

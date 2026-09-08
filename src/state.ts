@@ -38,10 +38,10 @@ export class WorkerState {
         actor_id TEXT,
         action TEXT NOT NULL,
         request TEXT NOT NULL,
-        agent_profile TEXT,
+        agent TEXT NOT NULL,
         status TEXT NOT NULL,
         status_message_id TEXT,
-        codex_session_id TEXT,
+        agent_session_id TEXT,
         error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -49,10 +49,10 @@ export class WorkerState {
       CREATE TABLE IF NOT EXISTS sessions (
         project_id TEXT NOT NULL,
         thread_id TEXT NOT NULL,
-        agent_profile TEXT NOT NULL,
+        agent TEXT NOT NULL,
         session_id TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        PRIMARY KEY (project_id, thread_id, agent_profile)
+        PRIMARY KEY (project_id, thread_id, agent)
       );
       CREATE TABLE IF NOT EXISTS metadata (
         key TEXT PRIMARY KEY,
@@ -132,7 +132,7 @@ export class WorkerState {
         .prepare(`
           INSERT INTO tasks (
             task_id, project_id, thread_id, message_id, actor_id, action,
-            request, agent_profile, status, created_at, updated_at
+            request, agent, status, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
         `)
         .run(
@@ -143,7 +143,7 @@ export class WorkerState {
           task.actorId ?? null,
           task.action,
           task.request,
-          task.agentProfile ?? null,
+          task.agent,
           now,
           now,
         );
@@ -158,36 +158,36 @@ export class WorkerState {
   updateTask(
     taskId: string,
     status: TaskStatus,
-    values: { statusMessageId?: string; codexSessionId?: string; error?: string } = {},
+    values: { statusMessageId?: string; sessionId?: string; error?: string } = {},
   ): void {
     const current = this.database
-      .prepare("SELECT status_message_id, codex_session_id, error FROM tasks WHERE task_id = ?")
+      .prepare("SELECT status_message_id, agent_session_id, error FROM tasks WHERE task_id = ?")
       .get(taskId) as
-      | { status_message_id: string | null; codex_session_id: string | null; error: string | null }
+      | { status_message_id: string | null; agent_session_id: string | null; error: string | null }
       | undefined;
     if (!current) return;
     this.database
       .prepare(`
         UPDATE tasks
-        SET status = ?, status_message_id = ?, codex_session_id = ?, error = ?, updated_at = ?
+        SET status = ?, status_message_id = ?, agent_session_id = ?, error = ?, updated_at = ?
         WHERE task_id = ?
       `)
       .run(
         status,
         values.statusMessageId ?? current.status_message_id,
-        values.codexSessionId ?? current.codex_session_id,
+        values.sessionId ?? current.agent_session_id,
         values.error ?? current.error,
         new Date().toISOString(),
         taskId,
       );
   }
 
-  getSession(projectId: string, threadId: string, agentProfile?: string): string | undefined {
+  getSession(projectId: string, threadId: string, agent: string): string | undefined {
     const row = this.database
       .prepare(
-        "SELECT session_id FROM sessions WHERE project_id = ? AND thread_id = ? AND agent_profile = ?",
+        "SELECT session_id FROM sessions WHERE project_id = ? AND thread_id = ? AND agent = ?",
       )
-      .get(projectId, threadId, agentProfile ?? "default") as
+      .get(projectId, threadId, agent) as
       | { session_id: string }
       | undefined;
     return row?.session_id;
@@ -197,19 +197,19 @@ export class WorkerState {
     projectId: string,
     threadId: string,
     sessionId: string,
-    agentProfile?: string,
+    agent: string,
   ): void {
     this.database
       .prepare(`
-        INSERT INTO sessions (project_id, thread_id, agent_profile, session_id, updated_at)
+        INSERT INTO sessions (project_id, thread_id, agent, session_id, updated_at)
         VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(project_id, thread_id, agent_profile)
+        ON CONFLICT(project_id, thread_id, agent)
         DO UPDATE SET session_id = excluded.session_id, updated_at = excluded.updated_at
       `)
       .run(
         projectId,
         threadId,
-        agentProfile ?? "default",
+        agent,
         sessionId,
         new Date().toISOString(),
       );
