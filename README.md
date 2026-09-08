@@ -99,4 +99,9 @@ npm install
 npm test
 ```
 
+Maintainers can follow [the release guide][release-guide] to bootstrap npm
+Trusted Publishing and publish later versions from Git tags.
+
+[release-guide]: https://github.com/CsomePro/jujuleaf-worker/blob/main/docs/releasing.md
+
 Licensed under the MIT License.
