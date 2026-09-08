@@ -4,7 +4,7 @@
   "description": "Dispatch Overleaf comment tasks from JujuLeaf to coding agents.",
   "type": "module",
   "bin": {
-    "jujuleaf-worker": "./dist/src/cli.js"
+    "jujuleaf-worker": "dist/src/cli.js"
   },
   "files": [
     "dist/src/",
