@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { JujuLeafClient } from "./bridge.js";
 import { CodexClient } from "./codex.js";
 import { TaskCoordinator } from "./coordinator.js";
@@ -296,10 +296,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   return parsed.command === "doctor" ? doctor(parsed) : run(parsed);
 }
 
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-) {
+export function isEntrypoint(argv1 = process.argv[1]): boolean {
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
+if (isEntrypoint()) {
   main()
     .then((code) => {
       process.exitCode = code;
