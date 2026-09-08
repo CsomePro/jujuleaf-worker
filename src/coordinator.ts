@@ -24,7 +24,9 @@ interface SnapshotRecordData {
 }
 
 export interface CoordinatorOptions {
-  cwd: string;
+  workspace: string;
+  explicitProject: boolean;
+  profile?: string;
   mention: string;
   bootstrap: "recent" | "ignore" | "all";
   lookbackMinutes: number;
@@ -230,9 +232,12 @@ export class TaskCoordinator {
         task.threadId,
         task.agent,
       );
-      const prompt = buildPrompt(task, context);
+      const prompt = buildPrompt(task, context, {
+        explicitProject: this.options.explicitProject,
+        ...(this.options.profile ? { profile: this.options.profile } : {}),
+      });
       const execution = await agent.run({
-        cwd: this.options.cwd,
+        cwd: this.options.workspace,
         prompt,
         ...(existingSession ? { sessionId: existingSession } : {}),
         onSession: (sessionId) => {

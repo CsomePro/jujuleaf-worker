@@ -9,9 +9,22 @@ const resultSchemaPath = fileURLToPath(
   new URL("../../schemas/result.schema.json", import.meta.url),
 );
 
-export function buildPrompt(task: WorkerTask, context: ThreadContext): string {
+export interface PromptTarget {
+  explicitProject: boolean;
+  profile?: string;
+}
+
+export function buildPrompt(
+  task: WorkerTask,
+  context: ThreadContext,
+  target: PromptTarget,
+): string {
   const sop = readFileSync(sopPath, "utf8").trim();
   const resultSchema = readFileSync(resultSchemaPath, "utf8").trim();
+  const globalArgs = [
+    ...(target.explicitProject ? ["--project-id", task.projectId] : []),
+    ...(target.profile ? ["--profile", target.profile] : []),
+  ];
   const taskEnvelope: Record<string, unknown> = {
     schemaVersion: 1,
     taskId: task.id,
@@ -21,6 +34,12 @@ export function buildPrompt(task: WorkerTask, context: ThreadContext): string {
     threadId: task.threadId,
     messageId: task.messageId,
     request: task.request,
+    jujuleafTarget: {
+      source: target.explicitProject ? "explicit" : "workspace",
+      projectId: task.projectId,
+      profile: target.profile ?? null,
+      globalArgs,
+    },
   };
   if (task.actorId) taskEnvelope.actorId = task.actorId;
 

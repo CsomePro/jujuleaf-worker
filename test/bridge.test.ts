@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,7 +15,11 @@ function mockJujuLeaf(directory: string): string {
   const executable = join(directory, "mock-jujuleaf.mjs");
   const source = [
     "#!/usr/bin/env node",
-    "const args = process.argv.slice(2);",
+    "import { appendFileSync } from 'node:fs';",
+    "let args = process.argv.slice(2);",
+    "appendFileSync('.mock-jujuleaf-calls.jsonl', JSON.stringify(args) + '\\n');",
+    "const commandIndex = args.findIndex((arg) => ['bridge', 'skill', 'comment', 'edit-comment'].includes(arg));",
+    "args = args.slice(commandIndex);",
     "const protocol = { name: 'jujuleaf.bridge', version: 1 };",
     "const snapshot = { project: { id: 'project-1', name: 'Paper' }, documents: [], threads: [] };",
     "const context = { project: snapshot.project, documents: [], thread: { id: 'thread-1', state: 'open', messages: [], anchors: [] } };",
@@ -44,7 +54,12 @@ test("uses JujuLeaf Bridge v1 and ordinary comment commands", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-bridge-"));
   try {
     const binary = mockJujuLeaf(directory);
-    const client = new JujuLeafClient({ cwd: directory, binary });
+    const client = new JujuLeafClient({
+      cwd: directory,
+      binary,
+      projectId: "project-explicit",
+      profile: "overleaf",
+    });
     const description = await client.describe();
     assert.deepEqual(
       (description.protocol as { supportedVersions: number[] }).supportedVersions,
@@ -68,6 +83,24 @@ test("uses JujuLeaf Bridge v1 and ordinary comment commands", async () => {
       "comments.snapshot",
       "stream.closed",
     ]);
+
+    const calls = readFileSync(
+      join(directory, ".mock-jujuleaf-calls.jsonl"),
+      "utf8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    assert.deepEqual(calls[0], ["bridge", "describe"]);
+    assert.deepEqual(calls[3], ["skill", "status", "--raw"]);
+    for (const index of [1, 2, 4, 5, 6]) {
+      assert.deepEqual(calls[index]?.slice(0, 4), [
+        "--project-id",
+        "project-explicit",
+        "--profile",
+        "overleaf",
+      ]);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

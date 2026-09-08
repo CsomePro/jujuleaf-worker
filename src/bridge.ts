@@ -75,21 +75,34 @@ export interface JujuLeafClientOptions {
   cwd: string;
   binary?: string;
   protocol?: number;
+  projectId?: string;
+  profile?: string;
 }
 
 export class JujuLeafClient {
   readonly cwd: string;
   readonly binary: string;
   readonly protocol: number;
+  readonly projectId: string | undefined;
+  readonly profile: string | undefined;
 
   constructor(options: JujuLeafClientOptions) {
     this.cwd = options.cwd;
     this.binary = options.binary ?? "jujuleaf";
     this.protocol = options.protocol ?? 1;
+    this.projectId = options.projectId;
+    this.profile = options.profile;
+  }
+
+  private targeted(args: string[]): string[] {
+    const globalArgs: string[] = [];
+    if (this.projectId) globalArgs.push("--project-id", this.projectId);
+    if (this.profile) globalArgs.push("--profile", this.profile);
+    return [...globalArgs, ...args];
   }
 
   private async oneShot<T>(args: string[], operation: string): Promise<BridgeEnvelope<T>> {
-    const result = await runProcess(this.binary, args, { cwd: this.cwd });
+    const result = await runProcess(this.binary, this.targeted(args), { cwd: this.cwd });
     const line = result.stdout.trim();
     if (!line) {
       throw new Error(
@@ -195,7 +208,7 @@ export class JujuLeafClient {
   async reply(threadId: string, content: string): Promise<string | undefined> {
     const result = await runProcess(
       this.binary,
-      ["comment", "--raw", threadId, content],
+      this.targeted(["comment", "--raw", threadId, content]),
       { cwd: this.cwd },
     );
     if (result.code !== 0) {
@@ -212,7 +225,7 @@ export class JujuLeafClient {
   ): Promise<void> {
     const result = await runProcess(
       this.binary,
-      ["edit-comment", "--raw", threadId, messageId, content],
+      this.targeted(["edit-comment", "--raw", threadId, messageId, content]),
       { cwd: this.cwd },
     );
     if (result.code !== 0) {
@@ -224,7 +237,7 @@ export class JujuLeafClient {
     reconcileInterval: number,
     signal?: AbortSignal,
   ): AsyncGenerator<BridgeEnvelope<unknown>> {
-    const args = [
+    const args = this.targeted([
       "bridge",
       "comments",
       "watch",
@@ -232,7 +245,7 @@ export class JujuLeafClient {
       String(this.protocol),
       "--reconcile-interval",
       String(reconcileInterval),
-    ];
+    ]);
     const child = spawn(this.binary, args, {
       cwd: this.cwd,
       env: process.env,

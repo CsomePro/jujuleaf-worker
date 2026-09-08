@@ -88,9 +88,11 @@ class FakeJujuLeaf implements JujuLeafPort {
 
 class FakeAgent implements AgentPort {
   calls = 0;
+  readonly prompts: string[] = [];
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
     this.calls += 1;
+    this.prompts.push(options.prompt);
     const taskId = /"taskId":\s*"([^"]+)"/.exec(options.prompt)?.[1];
     assert(taskId);
     assert.match(options.prompt, /Use \$jujuleaf\./);
@@ -116,16 +118,17 @@ class FakeAgent implements AgentPort {
   }
 }
 
-function coordinatorOptions(overrides: Partial<{
-  bootstrap: "recent" | "ignore" | "all";
-  lookbackMinutes: number;
-}> = {}): CoordinatorOptions {
+function coordinatorOptions(
+  overrides: Partial<CoordinatorOptions> = {},
+): CoordinatorOptions {
   return {
-    cwd: process.cwd(),
+    workspace: process.cwd(),
+    explicitProject: false,
     mention: "@worker",
-    bootstrap: overrides.bootstrap ?? "all",
-    lookbackMinutes: overrides.lookbackMinutes ?? 30,
+    bootstrap: "all",
+    lookbackMinutes: 30,
     statusIntervalSeconds: 0,
+    ...overrides,
   };
 }
 
@@ -161,11 +164,15 @@ test("dispatches, reports, and deduplicates an @worker task", async () => {
       state,
       jujuleaf,
       agentMap(codex),
-      coordinatorOptions(),
+      coordinatorOptions({ explicitProject: true, profile: "overleaf" }),
     );
     await coordinator.accept(envelope(value));
     await coordinator.drain();
     assert.equal(codex.calls, 1);
+    assert.match(
+      codex.prompts[0] ?? "",
+      /"globalArgs": \[\s*"--project-id",\s*"project-1",\s*"--profile",\s*"overleaf"/,
+    );
     assert.equal(jujuleaf.replies.length, 1);
     assert.match(jujuleaf.edits.at(-1) ?? "", /no_changes/);
     assert.equal(

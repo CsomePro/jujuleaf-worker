@@ -19,7 +19,9 @@ const VERSION = (
 
 export interface Options {
   command: "run" | "doctor";
-  cwd: string;
+  workspace: string;
+  projectId?: string;
+  profile?: string;
   jujuleaf: string;
   codex: string;
   kimi: string;
@@ -46,6 +48,9 @@ Usage:
   jujuleaf-worker doctor [options]
 
 Options:
+  --project-id <id>            Overleaf project (otherwise discover from clone)
+  --profile <name>             JujuLeaf login profile (default: JujuLeaf default)
+  --workspace <path>           Existing Agent directory (default: current directory)
   --mention <name>             Mention prefix (default: @worker)
   --agent <names>              Agent(s), comma-separated; first handles @worker
                                (default: codex)
@@ -58,7 +63,7 @@ Options:
   --jujuleaf <path>            JujuLeaf executable (default: jujuleaf)
   --codex <path>               Codex executable (default: codex)
   --kimi <path>                Kimi Code executable (default: kimi)
-  -C, --cwd <path>             Dedicated JujuLeaf clone (default: current directory)
+  -C, --cwd <path>             Alias for --workspace
   -h, --help                   Show help
   -V, --version                Show version
 `;
@@ -92,7 +97,7 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
 
   const options: Options = {
     command,
-    cwd: process.cwd(),
+    workspace: process.cwd(),
     jujuleaf: "jujuleaf",
     codex: "codex",
     kimi: "kimi",
@@ -110,6 +115,27 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
     const arg = args[index];
     const value = args[index + 1];
     switch (arg) {
+      case "--project-id":
+        if (!value || value.startsWith("-")) {
+          throw new Error("--project-id requires an id");
+        }
+        options.projectId = value;
+        index += 1;
+        break;
+      case "--profile":
+        if (!value || value.startsWith("-")) {
+          throw new Error("--profile requires a name");
+        }
+        options.profile = value;
+        index += 1;
+        break;
+      case "--workspace":
+        if (!value || value.startsWith("-")) {
+          throw new Error("--workspace requires a path");
+        }
+        options.workspace = resolve(value);
+        index += 1;
+        break;
       case "--mention":
         if (!value || !/^@?[a-z0-9][a-z0-9_-]*$/i.test(value)) {
           throw new Error("--mention requires a simple @name");
@@ -166,8 +192,8 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
         break;
       case "-C":
       case "--cwd":
-        if (!value) throw new Error(`${arg} requires a path`);
-        options.cwd = resolve(value);
+        if (!value || value.startsWith("-")) throw new Error(`${arg} requires a path`);
+        options.workspace = resolve(value);
         index += 1;
         break;
       default:
@@ -227,11 +253,15 @@ async function preflight(options: Options): Promise<{
   jujuleaf: JujuLeafClient;
   agents: CheckedAgent[];
 }> {
-  if (!existsSync(options.cwd)) throw new Error(`workspace does not exist: ${options.cwd}`);
+  if (!existsSync(options.workspace)) {
+    throw new Error(`workspace does not exist: ${options.workspace}`);
+  }
   const jujuleaf = new JujuLeafClient({
-    cwd: options.cwd,
+    cwd: options.workspace,
     binary: options.jujuleaf,
     protocol: options.protocol,
+    ...(options.projectId ? { projectId: options.projectId } : {}),
+    ...(options.profile ? { profile: options.profile } : {}),
   });
   await jujuleaf.describe();
   const skillStatus = await jujuleaf.skillStatus();
@@ -240,7 +270,7 @@ async function preflight(options: Options): Promise<{
   );
   const agents = await Promise.all(
     clients.map((client) =>
-      checkAgent(client, options.cwd, skillInstalled(skillStatus, client.name)),
+      checkAgent(client, options.workspace, skillInstalled(skillStatus, client.name)),
     ),
   );
   return { jujuleaf, agents };
@@ -318,7 +348,9 @@ async function run(options: Options): Promise<number> {
   const state = new WorkerState(options.statePath);
   const interrupted = state.recoverInterruptedTasks();
   const coordinator = new TaskCoordinator(state, jujuleaf, agents, {
-    cwd: options.cwd,
+    workspace: options.workspace,
+    explicitProject: Boolean(options.projectId),
+    ...(options.profile ? { profile: options.profile } : {}),
     mention: options.mention,
     bootstrap: options.bootstrap,
     lookbackMinutes: options.lookbackMinutes,
@@ -330,7 +362,7 @@ async function run(options: Options): Promise<number> {
   process.once("SIGTERM", stop);
 
   process.stdout.write(
-    `JujuLeaf Worker ${VERSION}\nWorkspace: ${options.cwd}\nAgents: ${[...agents.keys()].join(", ")}\nPrimary agent: ${options.agents[0]}\nMention: ${options.mention}\n`,
+    `JujuLeaf Worker ${VERSION}\nProject: ${options.projectId ?? "from JujuLeaf workspace"}\nProfile: ${options.profile ?? "JujuLeaf default"}\nWorkspace: ${options.workspace}\nAgents: ${[...agents.keys()].join(", ")}\nPrimary agent: ${options.agents[0]}\nMention: ${options.mention}\n`,
   );
   if (interrupted > 0) {
     process.stdout.write(`Recovered ${interrupted} interrupted task record(s).\n`);

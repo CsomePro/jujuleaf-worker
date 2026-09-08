@@ -43,7 +43,7 @@ progress and a final summary back to the original comment thread.
 
 - Node.js 22.13 or newer
 - JujuLeaf with Bridge protocol 1 support (v0.1.2 or newer) installed on `PATH`
-- An authenticated JujuLeaf profile and a dedicated JujuLeaf project clone
+- An authenticated JujuLeaf profile and an Overleaf project ID or JujuLeaf clone
 - Codex and/or Kimi Code CLI installed and authenticated
 - The JujuLeaf Skill installed for each enabled agent with
   `jujuleaf skill install`
@@ -53,14 +53,29 @@ Skills. Those remain JujuLeaf responsibilities.
 
 ## Quick start
 
-Use a dedicated JujuLeaf clone so unattended Agent edits do not collide with a
-human working copy:
+Run the worker from any directory and select the Overleaf project explicitly:
 
 ```bash
-jujuleaf clone PROJECT_ID paper-worker
-cd paper-worker
-npx @jujuleaf/worker
+npx @jujuleaf/worker --project-id PROJECT_ID
 ```
+
+No clone is required. The current directory is only the Agent workspace.
+JujuLeaf uses its default profile unless `--profile` is supplied.
+
+The fully explicit form is:
+
+```bash
+mkdir -p agent-workspace
+npx @jujuleaf/worker \
+  --project-id PROJECT_ID \
+  --profile overleaf \
+  --workspace ./agent-workspace \
+  --agent codex
+```
+
+`--profile` and `--workspace` are optional. For backward compatibility, you
+can also omit `--project-id` inside a JujuLeaf clone; JujuLeaf then discovers
+the project from that workspace.
 
 The data flow stays deliberately small:
 
@@ -111,12 +126,15 @@ The mention is configurable. For example, `--mention @paperbot` enables
 Run diagnostics without starting the worker:
 
 ```bash
-npx @jujuleaf/worker doctor --agent codex,kimi
+npx @jujuleaf/worker doctor --project-id PROJECT_ID --agent codex,kimi
 ```
 
 ## Options
 
 ```text
+--project-id <id>            Overleaf project (otherwise discover from clone)
+--profile <name>             JujuLeaf login profile (default: JujuLeaf default)
+--workspace <path>           Existing Agent directory (default: current directory)
 --mention <name>             Mention prefix (default: @worker)
 --agent <names>              Agent(s), comma-separated; first handles @worker
                              (default: codex)
@@ -129,6 +147,7 @@ npx @jujuleaf/worker doctor --agent codex,kimi
 --jujuleaf <path>            JujuLeaf executable (default: jujuleaf)
 --codex <path>               Codex executable (default: codex)
 --kimi <path>                Kimi Code executable (default: kimi)
+-C, --cwd <path>             Alias for --workspace
 ```
 
 ## Safety model
@@ -136,16 +155,21 @@ npx @jujuleaf/worker doctor --agent codex,kimi
 - JujuLeaf owns authentication, Overleaf protocol handling, synchronization,
   and Skill installation.
 - JujuLeaf Bridge snapshots are authoritative; live events are wake-up hints.
-- One worker handles one dedicated project clone and runs one agent turn at a
-  time.
+- One worker handles one project, selected by `--project-id` or discovered
+  from a JujuLeaf clone, and runs one Agent turn at a time.
 - The worker never parses private Overleaf payloads.
 - Progress comments contain factual stages only, never hidden reasoning or raw
   command output.
 - Codex runs with workspace-write isolation and automatic approval review.
   Kimi Code runs in non-interactive prompt mode, whose tool calls are
-  auto-approved by Kimi Code. The dedicated clone is therefore the workspace
-  boundary.
+  auto-approved by Kimi Code. `--workspace` is therefore the local Agent
+  boundary; it is not implicitly cloned or synchronized.
 - JujuLeaf still performs version, hash, and conflict checks.
+
+The default comment action is `suggest`. Small, exact changes are submitted as
+JujuLeaf tracked suggestions so collaborators can accept or reject them.
+Direct remote edits require an explicit `edit` action. Larger multi-file
+review batches should run from a dedicated JujuLeaf clone.
 
 ## Development
 

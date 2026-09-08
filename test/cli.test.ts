@@ -24,6 +24,12 @@ test("parses worker mention and configured agents", () => {
     "all",
     "--reconcile-interval",
     "10",
+    "--project-id",
+    "project-123",
+    "--profile",
+    "overleaf",
+    "--workspace",
+    "./agent-workspace",
   ]);
   assert.notEqual(parsed, "help");
   assert.notEqual(parsed, "version");
@@ -33,6 +39,9 @@ test("parses worker mention and configured agents", () => {
   assert.equal(parsed.kimi, "/opt/kimi");
   assert.equal(parsed.bootstrap, "all");
   assert.equal(parsed.reconcileInterval, 10);
+  assert.equal(parsed.projectId, "project-123");
+  assert.equal(parsed.profile, "overleaf");
+  assert.equal(parsed.workspace, join(process.cwd(), "agent-workspace"));
 });
 
 test("rejects unsafe or invalid option values", () => {
@@ -50,6 +59,9 @@ test("rejects unsafe or invalid option values", () => {
     /greater than or equal to 5/,
   );
   assert.throws(() => parseOptions(["--unknown"]), /unknown argument/);
+  assert.throws(() => parseOptions(["--project-id", "--agent"]), /requires an id/);
+  assert.throws(() => parseOptions(["--profile"]), /requires a name/);
+  assert.throws(() => parseOptions(["--workspace", "--agent"]), /requires a path/);
 });
 
 test("uses Codex as the only configured agent by default", () => {
@@ -58,6 +70,17 @@ test("uses Codex as the only configured agent by default", () => {
   assert.notEqual(parsed, "version");
   if (parsed === "help" || parsed === "version") return;
   assert.deepEqual(parsed.agents, ["codex"]);
+  assert.equal(parsed.projectId, undefined);
+  assert.equal(parsed.profile, undefined);
+  assert.equal(parsed.workspace, process.cwd());
+});
+
+test("--cwd remains an alias for --workspace", () => {
+  const parsed = parseOptions(["--cwd", "./legacy-workspace"]);
+  assert.notEqual(parsed, "help");
+  assert.notEqual(parsed, "version");
+  if (parsed === "help" || parsed === "version") return;
+  assert.equal(parsed.workspace, join(process.cwd(), "legacy-workspace"));
 });
 
 test("recognizes an npm-style symlink as the CLI entrypoint", () => {
