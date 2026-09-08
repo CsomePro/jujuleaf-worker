@@ -1,4 +1,4 @@
-name: Publish to npm
+name: Stage release on npm
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  stage:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -24,6 +24,9 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: Install npm with staged publishing support
+        run: npm install --global npm@12.0.2
 
       - name: Verify tag matches package version
         env:
@@ -52,6 +55,6 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish package
+      - name: Stage package for approval
         if: steps.registry.outputs.published != 'true'
-        run: npm publish
+        run: npm stage publish

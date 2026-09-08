@@ -1,8 +1,43 @@
-# JujuLeaf Worker
+<p align="center">
+  <img src="https://raw.githubusercontent.com/CsomePro/jujuleaf-worker/main/assets/jujuleaf-worker-logo.png" alt="JujuLeaf Worker logo" width="176">
+</p>
+
+<h1 align="center">JujuLeaf Worker</h1>
+
+<p align="center">
+  Turn Overleaf comments into safe, observable coding-agent tasks.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@jujuleaf/worker">npm</a>
+  · <a href="https://github.com/CsomePro/jujuleaf">JujuLeaf</a>
+  · <a href="https://github.com/CsomePro/jujuleaf-worker/releases">Releases</a>
+  · <a href="https://github.com/CsomePro/jujuleaf-worker/blob/main/docs/releasing.md">Release guide</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/CsomePro/jujuleaf-worker/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CsomePro/jujuleaf-worker/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://www.npmjs.com/package/@jujuleaf/worker"><img alt="npm version" src="https://img.shields.io/npm/v/%40jujuleaf%2Fworker.svg"></a>
+  <a href="package.json"><img alt="Node.js 22.13+" src="https://img.shields.io/badge/node-%3E%3D22.13-339933?logo=node.js&logoColor=white"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/CsomePro/jujuleaf-worker"></a>
+</p>
 
 JujuLeaf Worker watches normalized Overleaf comment events through the JujuLeaf
-Bridge, dispatches `@worker` tasks to Codex or Kimi Code, and reports progress
-back to the original comment thread.
+Bridge, dispatches selected `@worker` tasks to Codex or Kimi Code, and reports
+progress and a final summary back to the original comment thread.
+
+## What it does
+
+- **Comment-driven work.** Start an Agent task without leaving the Overleaf
+  review thread where the request originated.
+- **Explicit Agent policy.** Choose Codex, Kimi Code, or an ordered list when
+  the worker starts; only configured Agents can receive tasks.
+- **Visible progress.** Keep collaborators informed with concise stage updates
+  and a structured final result instead of hidden terminal output.
+- **Durable coordination.** Deduplicate comment events, serialize Agent turns,
+  recover interrupted tasks, and resume per-thread Agent sessions.
+- **JujuLeaf-native safety.** Leave Overleaf authentication, project context,
+  Skill installation, synchronization, and conflict checks to JujuLeaf.
 
 ## Requirements
 
@@ -16,7 +51,7 @@ back to the original comment thread.
 JujuLeaf Worker does not install JujuLeaf, log in to Overleaf, or manage Agent
 Skills. Those remain JujuLeaf responsibilities.
 
-## Run
+## Quick start
 
 Use a dedicated JujuLeaf clone so unattended Agent edits do not collide with a
 human working copy:
@@ -27,24 +62,34 @@ cd paper-worker
 npx @jujuleaf/worker
 ```
 
+The data flow stays deliberately small:
+
+```text
+Overleaf comment → JujuLeaf Bridge → JujuLeaf Worker → Codex / Kimi Code
+       ↑                                      │
+       └──────── progress and result ─────────┘
+```
+
 The first snapshot processes recent unhandled mentions from open threads.
 Subsequent snapshots and events are deduplicated by Overleaf message ID.
 
-Codex is the only enabled agent by default, so plain `@worker` comments go to
-Codex. Choose a different agent when starting the worker:
+## Choose the Agent
+
+Codex is the only enabled Agent by default, so plain `@worker` comments go to
+Codex. Choose Kimi Code instead when starting the worker:
 
 ```bash
 npx @jujuleaf/worker --agent kimi
 ```
 
-To enable per-comment routing, configure more than one agent. The first agent
+To enable per-comment routing, configure more than one Agent. The first Agent
 handles plain `@worker` comments:
 
 ```bash
 npx @jujuleaf/worker --agent codex,kimi
 ```
 
-Supported comment forms for a multi-agent worker:
+Supported comment forms for a multi-Agent worker:
 
 ```text
 @worker Explain this derivation.
@@ -55,9 +100,9 @@ Supported comment forms for a multi-agent worker:
 @worker-kimi suggest Improve the academic prose.
 ```
 
-`@worker` uses the first configured agent. `@worker-codex`, `@worker-kimi`, or
-the first word after the mention selects one of the other enabled agents.
-Selectors for agents not enabled by `--agent` are ignored. Messages without an
+`@worker` uses the first configured Agent. `@worker-codex`, `@worker-kimi`, or
+the first word after the mention selects one of the other enabled Agents.
+Selectors for Agents not enabled by `--agent` are ignored. Messages without an
 explicit action default to `suggest`.
 
 The mention is configurable. For example, `--mention @paperbot` enables

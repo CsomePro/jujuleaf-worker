@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,11 @@ import { TaskCoordinator } from "./coordinator.js";
 import { KimiClient } from "./kimi.js";
 import type { AgentName } from "./types.js";
 
-const VERSION = "0.1.0";
+const VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 
 export interface Options {
   command: "run" | "doctor";
