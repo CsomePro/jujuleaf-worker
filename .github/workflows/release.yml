@@ -100,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.stage.outputs.tag }}
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "$RELEASE_TAG already has a GitHub release; nothing to do."
             exit 0
           fi
@@ -117,5 +117,6 @@ jobs:
             );
             fs.writeFileSync(path, body);
           ' "$notes"
-          gh release create "$RELEASE_TAG" --verify-tag --latest \
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --latest \
             --title "JujuLeaf Worker $RELEASE_TAG" --notes-file "$notes"
