@@ -117,14 +117,12 @@ class FakeAgent implements AgentPort {
 }
 
 function coordinatorOptions(overrides: Partial<{
-  defaultAgent: AgentName;
   bootstrap: "recent" | "ignore" | "all";
   lookbackMinutes: number;
 }> = {}): CoordinatorOptions {
   return {
     cwd: process.cwd(),
     mention: "@worker",
-    defaultAgent: overrides.defaultAgent ?? "codex",
     bootstrap: overrides.bootstrap ?? "all",
     lookbackMinutes: overrides.lookbackMinutes ?? 30,
     statusIntervalSeconds: 0,
@@ -227,7 +225,7 @@ test("recent bootstrap handles every recent message and ignores old backlog", as
   }
 });
 
-test("blocks an unavailable explicitly selected agent", async () => {
+test("ignores a selector for an agent not enabled in this worker", async () => {
   const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-profile-"));
   const state = new WorkerState(join(directory, "state.sqlite3"));
   const value = snapshot([
@@ -253,7 +251,45 @@ test("blocks an unavailable explicitly selected agent", async () => {
     await coordinator.accept(envelope(value));
     await coordinator.drain();
     assert.equal(codex.calls, 0);
-    assert.match(jujuleaf.edits.at(-1) ?? "", /not ready/);
+    assert.equal(jujuleaf.replies.length, 0);
+  } finally {
+    state.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("routes plain @worker to the first configured agent", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "jujuleaf-worker-primary-agent-"));
+  const state = new WorkerState(join(directory, "state.sqlite3"));
+  const value = snapshot([
+    {
+      id: "message-primary",
+      content: "@worker ask Explain this.",
+      createdAt: new Date().toISOString(),
+    },
+  ]);
+  const jujuleaf = new FakeJujuLeaf({
+    project: value.project,
+    documents: value.documents,
+    thread: value.threads[0]!,
+  });
+  const codex = new FakeAgent();
+  const kimi = new FakeAgent();
+  const agents = new Map<AgentName, AgentPort>([
+    ["kimi", kimi],
+    ["codex", codex],
+  ]);
+  try {
+    const coordinator = new TaskCoordinator(
+      state,
+      jujuleaf,
+      agents,
+      coordinatorOptions(),
+    );
+    await coordinator.accept(envelope(value));
+    await coordinator.drain();
+    assert.equal(kimi.calls, 1);
+    assert.equal(codex.calls, 0);
   } finally {
     state.close();
     rmSync(directory, { recursive: true, force: true });

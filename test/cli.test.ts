@@ -11,13 +11,13 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { isEntrypoint, parseOptions } from "../src/cli.js";
 
-test("parses worker mention and default agent options", () => {
+test("parses worker mention and configured agents", () => {
   const parsed = parseOptions([
     "run",
     "--mention",
     "agent",
-    "--default-agent",
-    "kimi",
+    "--agent",
+    "kimi,codex,kimi",
     "--kimi",
     "/opt/kimi",
     "--bootstrap",
@@ -29,7 +29,7 @@ test("parses worker mention and default agent options", () => {
   assert.notEqual(parsed, "version");
   if (parsed === "help" || parsed === "version") return;
   assert.equal(parsed.mention, "@agent");
-  assert.equal(parsed.defaultAgent, "kimi");
+  assert.deepEqual(parsed.agents, ["kimi", "codex"]);
   assert.equal(parsed.kimi, "/opt/kimi");
   assert.equal(parsed.bootstrap, "all");
   assert.equal(parsed.reconcileInterval, 10);
@@ -37,9 +37,10 @@ test("parses worker mention and default agent options", () => {
 
 test("rejects unsafe or invalid option values", () => {
   assert.throws(
-    () => parseOptions(["--default-agent", "unknown"]),
-    /codex or kimi/,
+    () => parseOptions(["--agent", "codex,unknown"]),
+    /codex, kimi/,
   );
+  assert.throws(() => parseOptions(["--agent", ""]), /--agent/);
   assert.throws(
     () => parseOptions(["--mention", "../worker"]),
     /simple @name/,
@@ -49,6 +50,14 @@ test("rejects unsafe or invalid option values", () => {
     /greater than or equal to 5/,
   );
   assert.throws(() => parseOptions(["--unknown"]), /unknown argument/);
+});
+
+test("uses Codex as the only configured agent by default", () => {
+  const parsed = parseOptions([]);
+  assert.notEqual(parsed, "help");
+  assert.notEqual(parsed, "version");
+  if (parsed === "help" || parsed === "version") return;
+  assert.deepEqual(parsed.agents, ["codex"]);
 });
 
 test("recognizes an npm-style symlink as the CLI entrypoint", () => {

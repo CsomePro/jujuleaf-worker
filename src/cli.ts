@@ -20,7 +20,7 @@ export interface Options {
   codex: string;
   kimi: string;
   mention: string;
-  defaultAgent: AgentName;
+  agents: AgentName[];
   protocol: number;
   reconcileInterval: number;
   bootstrap: "recent" | "ignore" | "all";
@@ -43,7 +43,8 @@ Usage:
 
 Options:
   --mention <name>             Mention prefix (default: @worker)
-  --default-agent <name>       codex or kimi (default: codex)
+  --agent <names>              Agent(s), comma-separated; first handles @worker
+                               (default: codex)
   --protocol <number>          Bridge protocol version (default: 1)
   --reconcile-interval <secs>  Snapshot interval, minimum 5 (default: 60)
   --bootstrap <mode>           recent, ignore, or all (default: recent)
@@ -67,6 +68,17 @@ function numberOption(name: string, value: string | undefined, minimum: number):
   return parsed;
 }
 
+function agentOption(value: string | undefined): AgentName[] {
+  const agents = value?.split(",").map((agent) => agent.trim()).filter(Boolean) ?? [];
+  if (
+    agents.length === 0 ||
+    agents.some((agent) => agent !== "codex" && agent !== "kimi")
+  ) {
+    throw new Error("--agent must be codex, kimi, or a comma-separated list of both");
+  }
+  return [...new Set(agents)] as AgentName[];
+}
+
 export function parseOptions(argv: string[]): Options | "help" | "version" {
   const args = [...argv];
   let command: Options["command"] = "run";
@@ -81,7 +93,7 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
     codex: "codex",
     kimi: "kimi",
     mention: "@worker",
-    defaultAgent: "codex",
+    agents: ["codex"],
     protocol: 1,
     reconcileInterval: 60,
     bootstrap: "recent",
@@ -101,11 +113,8 @@ export function parseOptions(argv: string[]): Options | "help" | "version" {
         options.mention = value.startsWith("@") ? value : `@${value}`;
         index += 1;
         break;
-      case "--default-agent":
-        if (value !== "codex" && value !== "kimi") {
-          throw new Error("--default-agent must be codex or kimi");
-        }
-        options.defaultAgent = value;
+      case "--agent":
+        options.agents = agentOption(value);
         index += 1;
         break;
       case "--protocol":
@@ -186,6 +195,10 @@ interface CheckedAgent {
   error?: string;
 }
 
+function agentLabel(agent: AgentName): string {
+  return agent === "kimi" ? "kimi-code" : "codex";
+}
+
 async function checkAgent(
   client: AgentClient,
   cwd: string,
@@ -216,14 +229,16 @@ async function preflight(options: Options): Promise<{
     binary: options.jujuleaf,
     protocol: options.protocol,
   });
-  const codex = new CodexClient(options.codex);
-  const kimi = new KimiClient(options.kimi);
   await jujuleaf.describe();
   const skillStatus = await jujuleaf.skillStatus();
-  const agents = await Promise.all([
-    checkAgent(codex, options.cwd, skillInstalled(skillStatus, "codex")),
-    checkAgent(kimi, options.cwd, skillInstalled(skillStatus, "kimi")),
-  ]);
+  const clients = options.agents.map((agent) =>
+    agent === "kimi" ? new KimiClient(options.kimi) : new CodexClient(options.codex),
+  );
+  const agents = await Promise.all(
+    clients.map((client) =>
+      checkAgent(client, options.cwd, skillInstalled(skillStatus, client.name)),
+    ),
+  );
   return { jujuleaf, agents };
 }
 
@@ -233,16 +248,15 @@ async function doctor(options: Options): Promise<number> {
     const result = await preflight(options);
     checks.push({ name: "jujuleaf-bridge", status: "ok", detail: `protocol ${options.protocol}` });
     for (const agent of result.agents) {
-      const label = agent.client.name === "kimi" ? "kimi-code" : "codex";
-      const required = agent.client.name === options.defaultAgent;
+      const label = agentLabel(agent.client.name);
       checks.push({
         name: label,
-        status: agent.error ? (required ? "error" : "warning") : "ok",
+        status: agent.error ? "error" : "ok",
         detail: agent.error ?? agent.version ?? "available",
       });
       checks.push({
         name: `jujuleaf-skill:${label}`,
-        status: agent.skillInstalled ? "ok" : required ? "error" : "warning",
+        status: agent.skillInstalled ? "ok" : "error",
         detail: agent.skillInstalled
           ? `${label} installation is current`
           : `run \`jujuleaf skill install\` and select ${label}`,
@@ -278,19 +292,22 @@ async function doctor(options: Options): Promise<number> {
 
 async function run(options: Options): Promise<number> {
   const { jujuleaf, agents: checkedAgents } = await preflight(options);
+  const unavailable = checkedAgents.filter(
+    (checked) => checked.error || !checked.skillInstalled,
+  );
+  if (unavailable.length > 0) {
+    const details = unavailable.map((checked) => {
+      const reason = checked.error ?? "its JujuLeaf Skill is not current";
+      return `${agentLabel(checked.client.name)}: ${reason}`;
+    });
+    throw new Error(
+      `Configured agent(s) are not ready: ${details.join("; ")}. Run jujuleaf-worker doctor with the same --agent option for details.`,
+    );
+  }
+
   const agents = new Map<AgentName, AgentClient>();
   for (const checked of checkedAgents) {
-    if (!checked.error && checked.skillInstalled) {
-      agents.set(checked.client.name, checked.client);
-    }
-  }
-  if (!agents.has(options.defaultAgent)) {
-    const selected = checkedAgents.find(
-      (checked) => checked.client.name === options.defaultAgent,
-    );
-    throw new Error(
-      `The default agent ${options.defaultAgent} is not ready: ${selected?.error ?? "its JujuLeaf Skill is not current"}. Run jujuleaf-worker doctor for details.`,
-    );
+    agents.set(checked.client.name, checked.client);
   }
 
   const { WorkerState } = await import("./state.js");
@@ -299,7 +316,6 @@ async function run(options: Options): Promise<number> {
   const coordinator = new TaskCoordinator(state, jujuleaf, agents, {
     cwd: options.cwd,
     mention: options.mention,
-    defaultAgent: options.defaultAgent,
     bootstrap: options.bootstrap,
     lookbackMinutes: options.lookbackMinutes,
     statusIntervalSeconds: options.statusInterval,
@@ -310,7 +326,7 @@ async function run(options: Options): Promise<number> {
   process.once("SIGTERM", stop);
 
   process.stdout.write(
-    `JujuLeaf Worker ${VERSION}\nWorkspace: ${options.cwd}\nAgents: ${[...agents.keys()].join(", ")}\nDefault agent: ${options.defaultAgent}\nMention: ${options.mention}\n`,
+    `JujuLeaf Worker ${VERSION}\nWorkspace: ${options.cwd}\nAgents: ${[...agents.keys()].join(", ")}\nPrimary agent: ${options.agents[0]}\nMention: ${options.mention}\n`,
   );
   if (interrupted > 0) {
     process.stdout.write(`Recovered ${interrupted} interrupted task record(s).\n`);

@@ -30,7 +30,21 @@ npx @jujuleaf/worker
 The first snapshot processes recent unhandled mentions from open threads.
 Subsequent snapshots and events are deduplicated by Overleaf message ID.
 
-Codex is the default agent. Supported comment forms:
+Codex is the only enabled agent by default, so plain `@worker` comments go to
+Codex. Choose a different agent when starting the worker:
+
+```bash
+npx @jujuleaf/worker --agent kimi
+```
+
+To enable per-comment routing, configure more than one agent. The first agent
+handles plain `@worker` comments:
+
+```bash
+npx @jujuleaf/worker --agent codex,kimi
+```
+
+Supported comment forms for a multi-agent worker:
 
 ```text
 @worker Explain this derivation.
@@ -41,15 +55,10 @@ Codex is the default agent. Supported comment forms:
 @worker-kimi suggest Improve the academic prose.
 ```
 
-`@worker` uses `--default-agent`; `@worker-codex`, `@worker-kimi`, or the
-first word after the mention selects an agent explicitly. Messages without an
+`@worker` uses the first configured agent. `@worker-codex`, `@worker-kimi`, or
+the first word after the mention selects one of the other enabled agents.
+Selectors for agents not enabled by `--agent` are ignored. Messages without an
 explicit action default to `suggest`.
-
-To make Kimi Code the default:
-
-```bash
-npx @jujuleaf/worker --default-agent kimi
-```
 
 The mention is configurable. For example, `--mention @paperbot` enables
 `@paperbot`, `@paperbot-codex`, and `@paperbot-kimi`.
@@ -57,14 +66,15 @@ The mention is configurable. For example, `--mention @paperbot` enables
 Run diagnostics without starting the worker:
 
 ```bash
-npx @jujuleaf/worker doctor
+npx @jujuleaf/worker doctor --agent codex,kimi
 ```
 
 ## Options
 
 ```text
 --mention <name>             Mention prefix (default: @worker)
---default-agent <name>       codex or kimi (default: codex)
+--agent <names>              Agent(s), comma-separated; first handles @worker
+                             (default: codex)
 --protocol <number>          JujuLeaf Bridge protocol (default: 1)
 --reconcile-interval <secs>  Authoritative snapshot interval (default: 60)
 --bootstrap <mode>           recent, ignore, or all (default: recent)

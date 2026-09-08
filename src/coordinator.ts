@@ -26,7 +26,6 @@ interface SnapshotRecordData {
 export interface CoordinatorOptions {
   cwd: string;
   mention: string;
-  defaultAgent: AgentName;
   bootstrap: "recent" | "ignore" | "all";
   lookbackMinutes: number;
   statusIntervalSeconds: number;
@@ -170,12 +169,16 @@ export class TaskCoordinator {
     const trigger = parseTrigger(message.content, this.options.mention);
     if (!trigger) return;
 
+    const primaryAgent = this.agents.keys().next().value as AgentName | undefined;
+    const selectedAgent = trigger.agent ?? primaryAgent;
+    if (!selectedAgent || !this.agents.has(selectedAgent)) return;
+
     const task: WorkerTask = {
       id: `task-${randomUUID().slice(0, 8)}`,
       projectId: context.project.id,
       threadId: context.thread.id,
       messageId: message.id,
-      agent: trigger.agent ?? this.options.defaultAgent,
+      agent: selectedAgent,
       action: trigger.action,
       request: trigger.request,
       ...(message.author?.id ? { actorId: message.author.id } : {}),
